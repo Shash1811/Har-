@@ -1,218 +1,165 @@
-import streamlit as st
+import numpy as np
 import pandas as pd
-import joblib
+import yfinance as yf
+from keras.models import load_model
+import streamlit as st
+import matplotlib.pyplot as plt
+from sklearn.preprocessing import MinMaxScaler
+from datetime import datetime, timedelta
 import os
+import gdown
 
-# -------------------- Page Config --------------------
-st.set_page_config(
-    page_title="Human Activity Recognition",
-    page_icon="🕺",
-    layout="wide"
+# ----------------- Styling -----------------
+st.markdown(
+    """
+    <style>
+    .stApp {
+        background-color: #1a1f36; /* Midnight Blue */
+        color: white;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
 )
 
-# -------------------- ORANGE THEME STYLING --------------------
-st.markdown("""
-<style>
+# ----------------- Streamlit App -----------------
+st.header('📈 Stock Market Predictor')
 
-/* Main background */
-.main {
-    background-color: #fffaf5;
-}
-
-/* Title */
-h1 {
-    color: #e67e22 !important;
-    font-weight: 700;
-}
-
-/* Section headers */
-h2, h3 {
-    color: #d35400 !important;
-}
-
-/* Info/Success/Warning boxes */
-div[data-testid="stAlert"] {
-    border-radius: 12px;
-}
-
-/* Buttons */
-.stDownloadButton > button,
-.stButton > button {
-    background-color: #e67e22;
-    color: white;
-    border-radius: 10px;
-    border: none;
-    padding: 0.5rem 1rem;
-    font-weight: 600;
-}
-
-.stDownloadButton > button:hover,
-.stButton > button:hover {
-    background-color: #d35400;
-    color: white;
-}
-
-/* Metrics styling */
-[data-testid="metric-container"] {
-    background-color: #fff3e6;
-    border: 1px solid #f5cba7;
-    padding: 10px;
-    border-radius: 12px;
-}
-
-/* Dataframe container */
-[data-testid="stDataFrame"] {
-    border: 1px solid #f5cba7;
-    border-radius: 12px;
-}
-
-/* File uploader */
-section[data-testid="stFileUploader"] {
-    background-color: #fff3e6;
-    padding: 12px;
-    border-radius: 12px;
-    border: 1px solid #f5cba7;
-}
-
-</style>
-""", unsafe_allow_html=True)
-
-# -------------------- Load Model --------------------
-@st.cache_resource
-def load_model():
-    model = joblib.load("har_model.pkl")
-    feature_names = joblib.load("features.pkl")
-    return model, feature_names
-
-
-model, feature_names = load_model()
-
-# -------------------- Header --------------------
-st.title("🕺 Human Activity Recognition App")
-
-st.write(
-    "Predict human activities using sensor data. "
-    "A sample dataset loads automatically when the app starts."
-)
-
-# -------------------- About App Section --------------------
-st.markdown("### 📘 About This App")
-
+# ----------------- NEW INSTRUCTIONS (ONLY ADDITION) -----------------
 st.info("""
-This application performs **Human Activity Recognition (HAR)** using machine learning.
+📘 **How to use this app**
 
-🔹 The model is trained using **UCI Sensor Data (Human Activity Recognition Dataset)**.  
-🔹 Sensor signals such as accelerometer and gyroscope readings are used to classify human activities.  
-🔹 The system predicts activities like walking, sitting, standing, running, etc.  
+1️⃣ Go to **Yahoo Finance**  
+🔗 https://finance.yahoo.com/
 
-### ⚙️ How it works
-1. Sensor-based features are extracted from motion data.You can upload your own CSV or use the provided sample.
-2. A trained ML model analyzes the feature patterns.
-3. The model predicts the most likely human activity.
+2️⃣ Search for your stock שם/company there.
 
-📚 **Dataset Source:** UCI Machine Learning Repository  
-🎓 Educational and demonstration purpose only.
+3️⃣ Copy the **Ticker Symbol** (example: AAPL, GOOG, TSLA).
+
+4️⃣ Paste that symbol below to fetch stock prices.
+
+⚠️ You must use the **stock symbol**, not the company name.
 """)
 
-# -------------------- Risk Mapping --------------------
-def map_risk(activity):
-    activity = str(activity).lower()
+# ----------------- Download & Load Model -----------------
+file_id = "1ed7SiQg-tMyn0Op7UHYwpqfXe6FjY3Ij"
+download_url = f"https://drive.google.com/uc?id={file_id}"
+local_model_path = "stock_model.keras"
 
-    no_risk = ["sitting", "standing", "lying"]
-    neutral = ["walking", "walking_upstairs", "walking_downstairs"]
-    high_risk = ["running", "jumping", "fall", "sudden_movement"]
+# Download only if not already present
+if not os.path.exists(local_model_path):
+    with st.spinner("Downloading model... please wait ⏳"):
+        gdown.download(download_url, local_model_path, quiet=False)
 
-    if activity in no_risk:
-        return "No Risk"
-    elif activity in neutral:
-        return "Neutral"
+# Load the trained model (SAFE LOAD FIX)
+try:
+    model = load_model(local_model_path)
+except Exception as e:
+    st.error(f"Model failed to load: {e}")
+    st.stop()
+
+# Date range: last 10 years
+end = datetime.today()
+start = end - timedelta(days=365 * 10)
+
+# User input
+stock = st.text_input("Enter stock symbol", "GOOG")
+
+# Download data
+data = yf.download(stock, start=start, end=end)
+
+if data.empty or 'Close' not in data.columns:
+    st.error("Failed to fetch data for the symbol. Please check and try again.")
+    st.stop()
+
+# Show data
+st.subheader('Stock Data')
+st.write(data)
+
+# Preprocessing
+data_train = pd.DataFrame(data.Close[:int(len(data) * 0.80)])
+data_test = pd.DataFrame(data.Close[int(len(data) * 0.80):])
+
+scaler = MinMaxScaler(feature_range=(0, 1))
+pas_100_days = data_train.tail(100)
+data_test = pd.concat([pas_100_days, data_test], ignore_index=True)
+data_test_scaler = scaler.fit_transform(data_test)
+
+# Moving Averages
+ma_50_days = data.Close.rolling(50).mean()
+ma_100_days = data.Close.rolling(100).mean()
+ma_200_days = data.Close.rolling(200).mean()
+
+# Plot MA50
+st.subheader('Price vs MA50')
+fig1 = plt.figure(figsize=(10, 5))
+plt.plot(data.Close, label='Closing Price', color='green')
+plt.plot(ma_50_days, label='MA50', color='red')
+plt.legend()
+st.pyplot(fig1)
+
+# Plot MA50 & MA100
+st.subheader('Price vs MA50 vs MA100')
+fig2 = plt.figure(figsize=(10, 5))
+plt.plot(data.Close, label='Closing Price', color='green')
+plt.plot(ma_50_days, label='MA50', color='red')
+plt.plot(ma_100_days, label='MA100', color='blue')
+plt.legend()
+st.pyplot(fig2)
+
+# Plot MA100 & MA200
+st.subheader('Price vs MA100 vs MA200')
+fig3 = plt.figure(figsize=(10, 5))
+plt.plot(data.Close, label='Closing Price', color='green')
+plt.plot(ma_100_days, label='MA100', color='blue')
+plt.plot(ma_200_days, label='MA200', color='red')
+plt.legend()
+st.pyplot(fig3)
+
+# Predictions
+x, y = [], []
+for i in range(100, data_test_scaler.shape[0]):
+    x.append(data_test_scaler[i - 100:i])
+    y.append(data_test_scaler[i, 0])
+x = np.array(x)
+y = np.array(y)
+
+try:
+    predict = model.predict(x)
+except Exception as e:
+    st.error(f"Prediction failed: {e}")
+    st.stop()
+
+# Inverse scaling
+predict = scaler.inverse_transform(predict.reshape(-1, 1))
+y = scaler.inverse_transform(y.reshape(-1, 1))
+
+# Plot Predictions
+st.subheader('Original Price vs Predicted Price')
+fig4 = plt.figure(figsize=(10, 5))
+plt.plot(y, label='Original Price', color='red')
+plt.plot(predict, label='Predicted Price', color='green')
+plt.xlabel('Time')
+plt.ylabel('Price')
+plt.legend()
+st.pyplot(fig4)
+
+# Investment Suggestion
+st.subheader('📊 Investment Suggestion')
+
+try:
+    latest_ma50 = ma_50_days.dropna().iloc[-1]
+    latest_ma200 = ma_200_days.dropna().iloc[-1]
+
+    if float(latest_ma50) > float(latest_ma200):
+        st.success("✅ 50-day MA is above 200-day MA — indicates **positive trend**. You *may* consider investing.")
     else:
-        return "High Risk"
+        st.info("⚠️ 50-day MA is below 200-day MA — market may be in **downtrend**. Be cautious.")
 
-# -------------------- Auto Load Sample --------------------
-DATA_FILE = "sample_test.csv"
-
-data = None
-
-if os.path.exists(DATA_FILE):
-    data = pd.read_csv(DATA_FILE)
-    st.success("✅ Loaded sample_test.csv automatically")
-else:
-    st.warning("⚠️ sample_test.csv not found in project folder.")
-
-# -------------------- Upload Option --------------------
-uploaded_file = st.file_uploader(
-    "Upload your own CSV (optional — overrides sample)",
-    type="csv"
-)
-
-if uploaded_file:
-    data = pd.read_csv(uploaded_file)
-    st.success("📂 Custom CSV uploaded successfully!")
-
-# -------------------- Main Logic --------------------
-if data is not None:
-
-    st.subheader("📄 Preview of Input Data")
-    st.dataframe(data.head(), use_container_width=True)
-
-    # Check required features
-    if set(feature_names).issubset(data.columns):
-
-        X_test = data[feature_names]
-
-        # Predictions
-        predictions = model.predict(X_test)
-        data["Predicted Activity"] = predictions
-
-        # -------- RISK COLUMN --------
-        data["Risk Level"] = data["Predicted Activity"].apply(map_risk)
-
-        st.subheader("🎯 Prediction Results")
-        st.success("Predictions completed successfully!")
-
-        st.dataframe(data.head(), use_container_width=True)
-
-        # -------------------- Activity Distribution --------------------
-        st.subheader("📊 Activity Distribution")
-
-        activity_counts = data["Predicted Activity"].value_counts()
-        st.bar_chart(activity_counts)
-
-        # -------------------- Risk Distribution --------------------
-        st.subheader("⚠️ Risk Level Distribution")
-        st.bar_chart(data["Risk Level"].value_counts())
-
-        # -------------------- Summary Stats --------------------
-        st.subheader("📈 Insights")
-
-        col1, col2, col3 = st.columns(3)
-
-        with col1:
-            st.metric("Total Samples", len(data))
-
-        with col2:
-            st.metric("Unique Activities", data["Predicted Activity"].nunique())
-
-        with col3:
-            most_common = activity_counts.idxmax()
-            st.metric("Most Common Activity", most_common)
-
-        # -------------------- Download Results --------------------
-        st.subheader("⬇️ Download Results")
-
-        csv = data.to_csv(index=False).encode("utf-8")
-        st.download_button(
-            label="Download Predictions CSV",
-            data=csv,
-            file_name="predicted_activities.csv",
-            mime="text/csv"
-        )
-
-    else:
-        missing = list(set(feature_names) - set(data.columns))
-        st.error("❌ Uploaded data is missing required features.")
-        st.write("Missing columns:", missing)
-
-else:
-    st.info("Upload a CSV or place sample_test.csv in project folder.")
+    st.markdown(
+        "<br>🚨 **Disclaimer:** This is a simple moving average-based suggestion.<br>"
+        "**Please do your own research. INVEST AT YOUR OWN RISK.**",
+        unsafe_allow_html=True
+    )
+except Exception as e:
+    st.warning(f"Could not generate suggestion: {e}")
