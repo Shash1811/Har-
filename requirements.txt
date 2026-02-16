@@ -7,3 +7,4 @@ keras
 yfinance
 matplotlib
 numpy
+gdown
