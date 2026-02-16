@@ -1,8 +1,9 @@
 streamlit
 pandas
 joblib
-streamlit
 scikit-learn
 tensorflow
 keras
 yfinance
+matplotlib
+numpy
